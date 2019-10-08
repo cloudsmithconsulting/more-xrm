@@ -1,6 +1,6 @@
 import { WebApiVersion } from "./Dynamics";
 import { dynamicsBatch } from "./DynamicsBatch";
-import { dynamicsRequest } from "./DynamicsRequest";
+import { dynamicsRequest, ConnectionOptions } from "./DynamicsRequest";
 import { AttributeMetadata, AttributeTypeCode, EntityAttributeMetadata, LookupAttributeMetadata } from "./Model/AttributeMetadata";
 import { EntityMetadata } from "./Model/EntityMetadata";
 import { OptionSetAttributeMetadata, OptionSetMetadata } from "./Model/OptionSetMetadata";
@@ -11,8 +11,8 @@ export type DynamicsOptionSetMetadata = OptionSetMetadata;
 export type DynamicsLookupAttributeMetadata = LookupAttributeMetadata;
 export type DynamicsOptionSetAttributeMetadata = OptionSetAttributeMetadata;
 
-export default function dynamicsMetadata(accessToken?: string): DynamicsMetadata {
-    return new DynamicsMetadataClient(accessToken);
+export default function dynamics(connectionOptions?: ConnectionOptions): DynamicsMetadata {
+    return new DynamicsMetadataClient(connectionOptions);
 }
 
 export function isLookupAttribute(attribute: DynamicsAttributeMetadata): attribute is DynamicsLookupAttributeMetadata {
@@ -112,15 +112,17 @@ const ExcludedAttributeNameFilters = [
 
 class DynamicsMetadataClient implements DynamicsMetadata {
     private dynamicsHeaders: any;
+    private connectionOptions: ConnectionOptions;
 
-    constructor(accessToken?: string) {
-        this.dynamicsHeaders = accessToken && {
-            'Authorization': 'Bearer ' + accessToken
-        };
+    constructor(options?:ConnectionOptions) {
+        if (options)
+        {
+            this.connectionOptions = options;
+        }
     }
 
     attributes(entityName: string): Promise<AttributeMetadata[]> {
-        return dynamicsBatch(this.dynamicsHeaders)
+        return dynamicsBatch(this.connectionOptions, this.dynamicsHeaders)
             .requestAllUrls(this.getMetadataUrls(entityName, false))
             .execute()
             .then(data => this.flatten(data)
@@ -130,14 +132,14 @@ class DynamicsMetadataClient implements DynamicsMetadata {
     }
 
     entities(): Promise<EntityMetadata[]> {
-        return dynamicsRequest<EntityType[]>(`/api/data/${WebApiVersion}/EntityDefinitions?$select=EntitySetName,Description,DisplayName,LogicalName,PrimaryIdAttribute,PrimaryNameAttribute,IconSmallName,IsActivity,IsCustomEntity`, this.dynamicsHeaders)
+        return dynamicsRequest<EntityType[]>(this.connectionOptions, `/api/data/${WebApiVersion}/EntityDefinitions?$select=EntitySetName,Description,DisplayName,LogicalName,PrimaryIdAttribute,PrimaryNameAttribute,IconSmallName,IsActivity,IsCustomEntity`, this.dynamicsHeaders)
             .then(data => data
                 .map(entity => DynamicsMetadataMapper.MapEntity(entity))
             );
     }
 
     entity(entityName: string): Promise<EntityAttributeMetadata> {
-        return dynamicsRequest<EntityType>(`/api/data/${WebApiVersion}/EntityDefinitions(LogicalName='${entityName}')?$select=EntitySetName,Description,DisplayName,LogicalName,PrimaryIdAttribute,PrimaryNameAttribute,IconSmallName,IsActivity,IsCustomEntity`, this.dynamicsHeaders)
+        return dynamicsRequest<EntityType>(this.connectionOptions, `/api/data/${WebApiVersion}/EntityDefinitions(LogicalName='${entityName}')?$select=EntitySetName,Description,DisplayName,LogicalName,PrimaryIdAttribute,PrimaryNameAttribute,IconSmallName,IsActivity,IsCustomEntity`, this.dynamicsHeaders)
             .then(entity =>
                 this.attributes(entityName)
                     .then(attributes => DynamicsMetadataMapper.MapEntity(entity, attributes))
@@ -145,7 +147,7 @@ class DynamicsMetadataClient implements DynamicsMetadata {
     }
 
     entityAttributes(...entityNames: string[]): Promise<EntityAttributeMetadata[]> {
-        return dynamicsBatch(this.dynamicsHeaders)
+        return dynamicsBatch(this.connectionOptions, this.dynamicsHeaders)
             .requestAllUrls(this.flatten(entityNames.map(e => this.getMetadataUrls(e, true))))
             .execute()
             .then(data => {
