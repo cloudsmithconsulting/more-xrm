@@ -2,7 +2,6 @@ import { GetRootQuery, Query } from "../Query/Query";
 import GetQueryXml from "../Query/QueryXml";
 import { DynamicsHeaders, WebApiVersion } from "./Dynamics";
 import { Ntlm } from "../ntlm/ntlm";
-import { NtlmMessage } from "../ntlm/ntlm.message";
 
 export enum AuthenticationType
 {
@@ -10,67 +9,104 @@ export enum AuthenticationType
     OAuth = 2
 }
 
-export class AuthenticationOptions {
-    authType: AuthenticationType;
-    username?: string = "";
-    password?: string = "";
-    domain?: string = "";
-    workstation?: string = "";
-    accessToken?: string = "";
+export class ConnectionOptions {
+    authType: AuthenticationType = AuthenticationType.OAuth;
+    username?: string;
+    password?: string;
+    domain?: string;
+    workstation?: string;
+    accessToken?: string;
+    serverUrl: string;
 };
 
-function getAuthHeader() {
-    
-}
-
-export function authenticate(url:string, authenticationOptions: AuthenticationOptions): NtlmMessage
+export function authenticate(connectionOptions: ConnectionOptions): ConnectionOptions
 {
-    let ntlm = new Ntlm();
-    const type1Message = ntlm.createType1Message(2, authenticationOptions.workstation, url);
+    if (connectionOptions.authType == AuthenticationType.Windows)
+    {
+        let ntlm = new Ntlm();
+        const type1Message = ntlm.createType1Message(2, connectionOptions.workstation, connectionOptions.serverUrl);
 
-    fetch(url, {
-        headers: {
-          Connection: 'keep-alive',
-          Authorization: type1Message.header(),
-        }
-      })
-      .then(response => response.headers.get('www-authenticate'))
-      .then((auth) => {
-        if (!auth) {
-          throw new Error('Stage 1 NTLM handshake failed.');
-        }
-      
-        const type2Message = ntlm.decodeType2Message(auth);
+        fetch(connectionOptions.serverUrl, {
+            method: "HEAD",
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Authorization': type1Message.header(),
+                'Connection': 'keep-alive',
+                ...DynamicsHeaders
+            }
+        })
+        .then(response => response.headers.get('www-authenticate'))
+        .then((auth) => {
+            if (!auth) {
+                throw new Error('Stage 1 NTLM handshake failed.');
+            }
+        
+            const type2Message = ntlm.decodeType2Message(auth);
 
-        return ntlm.createType3Message(type1Message, type2Message, authenticationOptions.username, authenticationOptions.password, authenticationOptions.workstation, url, undefined, undefined);
-      });
+            let type3Message = ntlm.createType3Message(type1Message, type2Message, connectionOptions.username, connectionOptions.password, connectionOptions.workstation, connectionOptions.serverUrl, undefined, undefined);
 
-    return null;
+            if (type3Message)
+            {
+                connectionOptions.accessToken = type3Message.header();
+            }
+        })
+        .catch(response => {
+            if (!response.Ok)
+            {
+                throw new Error(response.responseText);
+            }
+        });
+    }
+
+    return connectionOptions;
 }
 
-export function dynamicsQuery<T>(query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
+export function dynamicsQuery<T>(connectionOptions: ConnectionOptions, query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
     const dataQuery = GetRootQuery(query);
+
     if (!dataQuery.EntityPath) {
         throw new Error('dynamicsQuery requires a Query object with an EntityPath');
     }
-    return dynamicsQueryUrl<T>(`/api/data/${WebApiVersion}/${dataQuery.EntityPath}`, query, maxRowCount, headers);
+
+    if (connectionOptions.accessToken === undefined)
+    {
+        connectionOptions = authenticate(connectionOptions);
+    }
+
+    return dynamicsQueryUrl<T>(connectionOptions, `/api/data/${WebApiVersion}/${dataQuery.EntityPath}`, query, maxRowCount, headers);
 }
 
-export function dynamicsQueryUrl<T>(dynamicsEntitySetUrl: string, query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
+export function dynamicsQueryUrl<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
     const querySeparator = (dynamicsEntitySetUrl.indexOf('?') > -1 ? '&' : '?');
-    return request<T[]>(`${dynamicsEntitySetUrl}${querySeparator}fetchXml=${escape(GetQueryXml(query, maxRowCount))}`, 'GET', undefined, headers);
+
+    if (connectionOptions.accessToken === undefined)
+    {
+        connectionOptions = authenticate(connectionOptions);
+    }
+
+    return request<T[]>(connectionOptions, `${dynamicsEntitySetUrl}${querySeparator}fetchXml=${escape(GetQueryXml(query, maxRowCount))}`, 'GET', undefined, headers);
 }
 
-export function dynamicsRequest<T>(dynamicsEntitySetUrl: string, headers?: any): Promise<T> {
-    return request<T>(dynamicsEntitySetUrl, 'GET', undefined, headers);
+export function dynamicsRequest<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, headers?: any): Promise<T> {
+    if (connectionOptions.accessToken === undefined)
+    {
+        connectionOptions = authenticate(connectionOptions);
+    }
+
+    return request<T>(connectionOptions, dynamicsEntitySetUrl, 'GET', undefined, headers);
 }
 
-export function dynamicsSave(entitySetName: string, data: any, id?: string, headers?: any): Promise<string> {
+export function dynamicsSave(connectionOptions: ConnectionOptions, entitySetName: string, data: any, id?: string, headers?: any): Promise<string> {
+    if (connectionOptions.accessToken === undefined)
+    {
+        connectionOptions = authenticate(connectionOptions);
+    }
+
     if (id) {
-        return request(`/api/data/${WebApiVersion}/${entitySetName}(${trimId(id)})`, 'PATCH', data, headers);
+        return request(connectionOptions, `/api/data/${WebApiVersion}/${entitySetName}(${trimId(id)})`, 'PATCH', data, headers);
     }
     else {
-        return request(`/api/data/${WebApiVersion}/${entitySetName}()`, 'POST', data, headers);
+        return request(connectionOptions, `/api/data/${WebApiVersion}/${entitySetName}()`, 'POST', data, headers);
     }
 }
 
@@ -128,11 +164,21 @@ export function formatDynamicsResponse(data) {
     return items;
 }
 
-function request<T>(url: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: any, headers?: any): Promise<T> {
-    return fetch(url, {
+function request<T>(connectionOptions: ConnectionOptions, url: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: any, headers?: any): Promise<T> {
+    let callUrl: string = connectionOptions.serverUrl;
+
+    if (callUrl.endsWith("/"))
+    {
+        callUrl = callUrl.substr(0, callUrl.length - 1);
+    }
+
+    callUrl = `${callUrl}${url}`;
+
+    return fetch(callUrl, {
         method: method,
         headers: {
             'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': connectionOptions.accessToken,
             ...DynamicsHeaders,
             ...headers
         },
