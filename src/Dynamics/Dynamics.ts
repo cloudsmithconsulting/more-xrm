@@ -22,6 +22,7 @@ export default function dynamics(accessToken?: string): Dynamics {
     return new DynamicsClient(accessToken);
 }
 
+
 class DynamicsClient implements Dynamics {
     private dynamicsHeaders: any;
 

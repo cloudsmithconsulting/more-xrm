@@ -1,6 +1,52 @@
 import { GetRootQuery, Query } from "../Query/Query";
 import GetQueryXml from "../Query/QueryXml";
 import { DynamicsHeaders, WebApiVersion } from "./Dynamics";
+import { Ntlm } from "../ntlm/ntlm";
+import { NtlmMessage } from "../ntlm/ntlm.message";
+
+export enum AuthenticationType
+{
+    Windows = 1,
+    OAuth = 2
+}
+
+export class AuthenticationOptions {
+    authType: AuthenticationType;
+    username?: string = "";
+    password?: string = "";
+    domain?: string = "";
+    workstation?: string = "";
+    accessToken?: string = "";
+};
+
+function getAuthHeader() {
+    
+}
+
+export function authenticate(url:string, authenticationOptions: AuthenticationOptions): NtlmMessage
+{
+    let ntlm = new Ntlm();
+    const type1Message = ntlm.createType1Message(2, authenticationOptions.workstation, url);
+
+    fetch(url, {
+        headers: {
+          Connection: 'keep-alive',
+          Authorization: type1Message.header(),
+        }
+      })
+      .then(response => response.headers.get('www-authenticate'))
+      .then((auth) => {
+        if (!auth) {
+          throw new Error('Stage 1 NTLM handshake failed.');
+        }
+      
+        const type2Message = ntlm.decodeType2Message(auth);
+
+        return ntlm.createType3Message(type1Message, type2Message, authenticationOptions.username, authenticationOptions.password, authenticationOptions.workstation, url, undefined, undefined);
+      });
+
+    return null;
+}
 
 export function dynamicsQuery<T>(query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
     const dataQuery = GetRootQuery(query);
@@ -29,7 +75,7 @@ export function dynamicsSave(entitySetName: string, data: any, id?: string, head
 }
 
 export function formatDynamicsResponse(data) {
-    var items = [];
+    var items = []; 
     if (data && data.error) {
         throw new Error(data.error);
     }

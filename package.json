@@ -2,15 +2,11 @@
   "name": "more-xrm",
   "version": "0.1.2",
   "private": false,
-  "author": {
-    "name": "Greg DeCarlo",
-    "email": "greg@scalabledynamicsllc.com",
-    "url": "http://www.scalabledynamicsllc.com"
-  },
+  "author": "Greg DeCarlo <greg@scalabledynamicsllc.com> (http://www.scalabledynamicsllc.com)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scalable-dynamics/more-xrm.git"
+    "url": "git+https://github.com/scalable-dynamics/more-xrm.git"
   },
   "homepage": "https://github.com/scalable-dynamics/more-xrm",
   "description": "Create more applications using the Microsoft Dynamics Xrm platform, enables querying the dynamics data model from any application.",
@@ -42,5 +38,20 @@
   },
   "files": [
     "lib/**/*"
-  ]
+  ],
+  "dependencies": {
+    "@types/inversify": "^2.0.33",
+    "@types/node": "^12.7.11",
+    "inversify": "^5.0.1",
+    "os": "^0.1.1"
+  },
+  "bugs": {
+    "url": "https://github.com/scalable-dynamics/more-xrm/issues"
+  },
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
 }
