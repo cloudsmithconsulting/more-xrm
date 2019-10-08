@@ -22,6 +22,7 @@ export interface DataQueryJoin extends DataQuery {
 }
 
 export interface Query {
+    [key:string]: any; // Add index signature
     alias(attributeName: string, alias: string): Query;
     path(entityPath: string): Query;
     select(...attributeNames: string[]): Query;
@@ -126,7 +127,8 @@ class QueryProvider implements Query {
     }
 
     public whereAny(any: (or: (attributeName: string, operator: QueryOperatorParam, ...values: any[]) => void) => void): Query {
-        var conditions = [];
+        let conditions:DataQueryCondition[] = [];
+        
         any((attributeName: string, operator: QueryOperatorParam, ...values: any[]) => {
             conditions.push({
                 AttributeName: attributeName,

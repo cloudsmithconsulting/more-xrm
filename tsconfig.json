@@ -4,6 +4,17 @@
     "declaration": true,
     "module": "es6",
     "rootDir": "src",
-    "target": "es6"
-  }
+    "target": "es6",
+    "outDir": "./bin",
+    "sourceMap": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
