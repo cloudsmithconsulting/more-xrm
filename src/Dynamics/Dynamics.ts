@@ -2,7 +2,7 @@ import query, { Query } from "../Query/Query";
 import { dynamicsBatch, DynamicsBatch } from "./DynamicsBatch";
 import { ConnectionOptions, dynamicsQuery, dynamicsRequest, dynamicsSave } from "./DynamicsRequest";
 
-export const WebApiVersion = 'v9.1';
+export const DefaultWebApiVersion = 'v9.1';
 export const DefaultMaxRecords = 100;
 export const DynamicsHeaders = {
     'OData-MaxVersion': '4.0',
@@ -25,7 +25,7 @@ export default function dynamics(connectionOptions?: ConnectionOptions): Dynamic
 
 class DynamicsClient implements Dynamics {
     private dynamicsHeaders: any;
-    private connectionOptions: ConnectionOptions;
+    private connectionOptions!: ConnectionOptions;
 
     constructor(options?:ConnectionOptions) {
         if (options)
@@ -45,10 +45,10 @@ class DynamicsClient implements Dynamics {
 
     optionset(entityName: any, attributeName: any): Promise<{ label: string, value: number }[]>
     {
-        return dynamicsRequest<any>(this.connectionOptions, `/api/data/${WebApiVersion}/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${attributeName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet($select=Options),GlobalOptionSet($select=Options)`, this.dynamicsHeaders)
+        return dynamicsRequest<any>(this.connectionOptions, `/api/data/${this.connectionOptions.webApiVersion}/EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${attributeName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=LogicalName&$expand=OptionSet($select=Options),GlobalOptionSet($select=Options)`, this.dynamicsHeaders)
         .then(attribute =>
             (attribute.OptionSet || attribute.GlobalOptionSet).Options.map(
-                (option) => ({
+                (option: { Label: { UserLocalizedLabel: { Label: any; }; }; Value: any; }) => ({
                     label: (option.Label && option.Label.UserLocalizedLabel && option.Label.UserLocalizedLabel.Label),
                     value: option.Value
                 })

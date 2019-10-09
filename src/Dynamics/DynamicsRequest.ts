@@ -1,7 +1,8 @@
 import { GetRootQuery, Query } from "../Query/Query";
 import GetQueryXml from "../Query/QueryXml";
-import { DynamicsHeaders, WebApiVersion } from "./Dynamics";
-import { Ntlm } from "../ntlm/ntlm";
+import { DynamicsHeaders, DefaultWebApiVersion } from "./Dynamics";
+import * as httpntlm from "httpntlm";
+import fetch from "node-fetch";
 
 export enum AuthenticationType
 {
@@ -16,101 +17,40 @@ export class ConnectionOptions {
     domain?: string;
     workstation?: string;
     accessToken?: string;
-    serverUrl: string;
-};
-
-export function authenticate(connectionOptions: ConnectionOptions): ConnectionOptions
-{
-    if (connectionOptions.authType == AuthenticationType.Windows)
-    {
-        let ntlm = new Ntlm();
-        const type1Message = ntlm.createType1Message(2, connectionOptions.workstation, connectionOptions.serverUrl);
-
-        fetch(connectionOptions.serverUrl, {
-            method: "HEAD",
-            headers: {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Authorization': type1Message.header(),
-                'Connection': 'keep-alive',
-                ...DynamicsHeaders
-            }
-        })
-        .then(response => response.headers.get('www-authenticate'))
-        .then((auth) => {
-            if (!auth) {
-                throw new Error('Stage 1 NTLM handshake failed.');
-            }
-        
-            const type2Message = ntlm.decodeType2Message(auth);
-
-            let type3Message = ntlm.createType3Message(type1Message, type2Message, connectionOptions.username, connectionOptions.password, connectionOptions.workstation, connectionOptions.serverUrl, undefined, undefined);
-
-            if (type3Message)
-            {
-                connectionOptions.accessToken = type3Message.header();
-            }
-        })
-        .catch(response => {
-            if (!response.Ok)
-            {
-                throw new Error(response.responseText);
-            }
-        });
-    }
-
-    return connectionOptions;
+    serverUrl: string = "";
+    webApiVersion: string = DefaultWebApiVersion;
 }
 
-export function dynamicsQuery<T>(connectionOptions: ConnectionOptions, query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
+export async function dynamicsQuery<T>(connectionOptions: ConnectionOptions, query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
     const dataQuery = GetRootQuery(query);
 
     if (!dataQuery.EntityPath) {
         throw new Error('dynamicsQuery requires a Query object with an EntityPath');
     }
 
-    if (connectionOptions.accessToken === undefined)
-    {
-        connectionOptions = authenticate(connectionOptions);
-    }
-
-    return dynamicsQueryUrl<T>(connectionOptions, `/api/data/${WebApiVersion}/${dataQuery.EntityPath}`, query, maxRowCount, headers);
+    return await dynamicsQueryUrl<T>(connectionOptions, `/api/data/${connectionOptions.webApiVersion}/${dataQuery.EntityPath}`, query, maxRowCount, headers);
 }
 
-export function dynamicsQueryUrl<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
+export async function dynamicsQueryUrl<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, query: Query, maxRowCount?: number, headers?: any): Promise<T[]> {
     const querySeparator = (dynamicsEntitySetUrl.indexOf('?') > -1 ? '&' : '?');
 
-    if (connectionOptions.accessToken === undefined)
-    {
-        connectionOptions = authenticate(connectionOptions);
-    }
-
-    return request<T[]>(connectionOptions, `${dynamicsEntitySetUrl}${querySeparator}fetchXml=${escape(GetQueryXml(query, maxRowCount))}`, 'GET', undefined, headers);
+    return await request<T[]>(connectionOptions, `${dynamicsEntitySetUrl}${querySeparator}fetchXml=${escape(GetQueryXml(query, maxRowCount))}`, 'GET', undefined, headers);
 }
 
-export function dynamicsRequest<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, headers?: any): Promise<T> {
-    if (connectionOptions.accessToken === undefined)
-    {
-        connectionOptions = authenticate(connectionOptions);
-    }
-
-    return request<T>(connectionOptions, dynamicsEntitySetUrl, 'GET', undefined, headers);
+export async function dynamicsRequest<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, headers?: any): Promise<T> {
+    return await request<T>(connectionOptions, dynamicsEntitySetUrl, 'GET', undefined, headers);
 }
 
-export function dynamicsSave(connectionOptions: ConnectionOptions, entitySetName: string, data: any, id?: string, headers?: any): Promise<string> {
-    if (connectionOptions.accessToken === undefined)
-    {
-        connectionOptions = authenticate(connectionOptions);
-    }
-
+export async function dynamicsSave(connectionOptions: ConnectionOptions, entitySetName: string, data: any, id?: string, headers?: any): Promise<string> {
     if (id) {
-        return request(connectionOptions, `/api/data/${WebApiVersion}/${entitySetName}(${trimId(id)})`, 'PATCH', data, headers);
+        return await request(connectionOptions, `/api/data/${connectionOptions.webApiVersion}/${entitySetName}(${trimId(id)})`, 'PATCH', data, headers);
     }
     else {
-        return request(connectionOptions, `/api/data/${WebApiVersion}/${entitySetName}()`, 'POST', data, headers);
+        return await request(connectionOptions, `/api/data/${connectionOptions.webApiVersion}/${entitySetName}()`, 'POST', data, headers);
     }
 }
 
-export function formatDynamicsResponse(data) {
+export function formatDynamicsResponse(data: any): any {
     var items = []; 
     if (data && data.error) {
         throw new Error(data.error);
@@ -123,11 +63,12 @@ export function formatDynamicsResponse(data) {
     }
     if (data) {
         for (var item of data) {
-            var row = {};
-            for (var key in item) {
+            let row:any = {};
+
+            for (let key in item) {
                 var name: string = key;
 
-                if (name.indexOf('@odata') == 0) {
+                if (name.indexOf('@odata') === 0) {
                     continue;
                 }
 
@@ -136,19 +77,22 @@ export function formatDynamicsResponse(data) {
                 }
 
                 if (name.indexOf('@') > -1) {
-                    name = name.substring(0, name.indexOf('@'))
-                    if (name.indexOf('_') == 0) {
+                    name = name.substring(0, name.indexOf('@'));
+
+                    if (name.indexOf('_') === 0) {
                         name = name.slice(1, -6);
                     }
+                    
                     name += "_formatted";
                 }
-                else if (name.indexOf('_') == 0) {
+                else if (name.indexOf('_') === 0) {
                     name = name.slice(1, -6);
                 }
 
                 if (name.indexOf('_x002e_') > -1) {
                     var obj = name.substring(0, name.indexOf('_x002e_'));
                     name = name.substring(name.indexOf('_x002e_') + 7);
+
                     if (!row[obj]) {
                         row[obj] = {};
                     }
@@ -164,7 +108,7 @@ export function formatDynamicsResponse(data) {
     return items;
 }
 
-function request<T>(connectionOptions: ConnectionOptions, url: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: any, headers?: any): Promise<T> {
+async function request<T>(connectionOptions: ConnectionOptions, url: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: any, headers?: any): Promise<T> {
     let callUrl: string = connectionOptions.serverUrl;
 
     if (callUrl.endsWith("/"))
@@ -174,18 +118,67 @@ function request<T>(connectionOptions: ConnectionOptions, url: string, method: '
 
     callUrl = `${callUrl}${url}`;
 
-    return fetch(callUrl, {
-        method: method,
-        headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'Authorization': connectionOptions.accessToken,
-            ...DynamicsHeaders,
-            ...headers
-        },
-        body: body
-    })
-        .then(response => response.json())
-        .then(data => formatDynamicsResponse(data));
+    //TODO: fetch if we can.
+    if (connectionOptions.authType === AuthenticationType.Windows)
+    {
+        return new Promise((resolve, reject) =>
+        {
+            httpntlm[method.toLowerCase()]({
+                url: callUrl,
+                username: connectionOptions.username,
+                password: connectionOptions.password,
+                workstation: connectionOptions.workstation || '',
+                domain: connectionOptions.domain || '',
+                body: body,
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    ...DynamicsHeaders,
+                    ...headers
+                }
+            }, function (err, res){
+                if (err) 
+                { 
+                    console.error(err);
+    
+                    reject(err);
+                }
+               
+                const json = JSON.parse(res.body);
+
+                if (json.error)
+                {
+                    console.error(json.error.message);
+
+                    reject (json.error.message);
+                }
+                else if (json.ExceptionMessage)
+                {
+                    console.error(json.ExceptionMessage);
+
+                    reject (`The service call returned HTTP ${json.ErrorCode} - ${json.ExceptionMessage}`);
+                }
+                else
+                {
+                    resolve(formatDynamicsResponse(json));
+                }
+            });
+        });
+    }
+    else
+    {
+        return fetch(url, {
+            method: method,
+            headers: {
+                'Authorization': `Bearer ${connectionOptions.accessToken}`,
+                'Content-Type': 'application/json; charset=utf-8',
+                ...DynamicsHeaders,
+                ...headers
+            },
+            body: body
+        })
+            .then(response => response.json())
+            .then(data => formatDynamicsResponse(data));
+    }
 }
 
 function trimId(id: string) {

@@ -81,7 +81,7 @@ export function GetRootQuery(query: Query): DataQuery {
 }
 class QueryProvider implements Query {
     public Query: DataQuery;
-    public RootQuery: Query;
+    public RootQuery: Query | undefined;
 
     constructor(private EntityName: string) {
         this.Query = {

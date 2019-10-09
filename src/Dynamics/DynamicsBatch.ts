@@ -1,10 +1,12 @@
 import { GetRootQuery, Query } from "../Query/Query";
 import GetQueryXml from "../Query/QueryXml";
-import { DefaultMaxRecords, DynamicsHeaders, WebApiVersion } from "./Dynamics";
-import { formatDynamicsResponse, ConnectionOptions, authenticate } from "./DynamicsRequest";
+import { DefaultMaxRecords, DynamicsHeaders } from "./Dynamics";
+import { formatDynamicsResponse, ConnectionOptions, AuthenticationType } from "./DynamicsRequest";
+import * as httpntlm from "httpntlm";
+import fetch from "node-fetch";
 
 export interface DynamicsBatch {
-    execute(): Promise<any[]>;
+    execute(): Promise<any[] | undefined>;
     request(query: Query, maxRowCount?: number): DynamicsBatch;
     requestAll(queries: Query[]): DynamicsBatch;
     requestAllUrls(urls: string[]): DynamicsBatch;
@@ -13,19 +15,21 @@ export interface DynamicsBatch {
     };
 }
 
-export function dynamicsBatch(connectionOptions?: ConnectionOptions, headers?: any): DynamicsBatch {
+export function dynamicsBatch(connectionOptions: ConnectionOptions, headers?: any): DynamicsBatch {
     return new Batch(connectionOptions, headers);
 }
 
-export function dynamicsBatchRequest<T = any>(...url: string[]): Promise<T[]> {
-    const batch = new Batch();
+export function dynamicsBatchRequest<T = any>(connectionOptions: ConnectionOptions, ...url: string[]): Promise<T[] | undefined> {
+    const batch = new Batch(connectionOptions);
     batch.requestAllUrls(url);
+    
     return batch.execute();
 }
 
-export function dynamicsBatchQuery<T = any>(...query: Query[]): Promise<T[]> {
-    const batch = new Batch();
+export function dynamicsBatchQuery<T = any>(connectionOptions: ConnectionOptions, ...query: Query[]): Promise<T[] | undefined> {
+    const batch = new Batch(connectionOptions);
     batch.requestAll(query);
+
     return batch.execute();
 }
 
@@ -41,29 +45,30 @@ interface BatchRequest {
 class Batch implements DynamicsBatch {
     private Changes: BatchRequest[];
     private RelatedChanges: BatchRequest[];
-    private ConnectionOptions: ConnectionOptions;
+    private ConnectionOptions!: ConnectionOptions;
 
-    constructor(private connectionOptions?: ConnectionOptions, private headers?: any) {
-        this.connectionOptions = connectionOptions;
+    constructor(private options: ConnectionOptions, private headers?: any) {
+        this.ConnectionOptions = options;
         this.Changes = [];
         this.RelatedChanges = [];
     }
 
     async execute() {
-        if (this.ConnectionOptions.accessToken === undefined)
-        {
-            this.ConnectionOptions = authenticate(this.ConnectionOptions);
-        }
-    
-        const results = await Batch.requestBatch(this.connectionOptions, `/api/data/${WebApiVersion}/$batch`, this.Changes, this.headers);
+        const results = await Batch.requestBatch(this.ConnectionOptions, `/api/data/${this.ConnectionOptions.webApiVersion}/$batch`, this.Changes, this.headers);
+
         if (this.RelatedChanges.length > 0) {
             for (let change of this.RelatedChanges) {
-                let changeIndex = this.Changes.indexOf(change.relatedChange);
-                let relatedId = results[changeIndex];
-                change.entityData[`${change.relatedPropertyName}@odata.bind`] = `${change.relatedChange.entitySetName}(${Batch.trimId(relatedId)})`;
+                if (change !== undefined && change.relatedChange)
+                {
+                    let changeIndex = this.Changes.indexOf(change.relatedChange);
+                    let relatedId = results !== undefined ? results[changeIndex] : undefined;
+                    change.entityData[`${change.relatedPropertyName}@odata.bind`] = `${change.relatedChange.entitySetName}(${Batch.trimId(relatedId)})`;
+                }
             }
-            const related = await Batch.requestBatch(this.connectionOptions, `/api/data/${WebApiVersion}/$batch`, this.RelatedChanges, this.headers);
-            return results.concat(related);
+        
+            const related = await Batch.requestBatch(this.ConnectionOptions, `/api/data/${this.ConnectionOptions.webApiVersion}/$batch`, this.RelatedChanges, this.headers);
+        
+            return results !== undefined ? results.concat(related) : undefined;
         }
         else {
             return results;
@@ -72,6 +77,7 @@ class Batch implements DynamicsBatch {
 
     requestAllUrls(urls: string[]) {
         this.Changes.push.apply(this.Changes, urls.map(entitySetQuery => ({ entitySetQuery })));
+        
         return this;
     }
 
@@ -79,11 +85,13 @@ class Batch implements DynamicsBatch {
         this.Changes.push.apply(queries.map(query => {
             const dataQuery = GetRootQuery(query);
             this.request(query);
+        
             return {
                 entitySetName: dataQuery.EntityPath,
                 entitySetQuery: `fetchXml=${escape(GetQueryXml(query))}`
             };
         }));
+        
         return this;
     }
 
@@ -119,7 +127,7 @@ class Batch implements DynamicsBatch {
 
     createRelatedEntity(entitySetName: string, data: any, navigationPropertyName: string) {
         let lastChange = this.Changes[this.Changes.length - 1];
-        if (!lastChange || lastChange.entityData == 'DELETE') throw new Error('createRelatedEntity relies on the previous change which was not found in the batch.');
+        if (!lastChange || lastChange.entityData === 'DELETE') { throw new Error('createRelatedEntity relies on the previous change which was not found in the batch.'); }
         if (lastChange.entityId) {
             data[`${navigationPropertyName}@odata.bind`] = `${lastChange.entitySetName}(${lastChange.entityId})`;
             this.Changes.push({
@@ -137,7 +145,7 @@ class Batch implements DynamicsBatch {
         }
     }
 
-    static requestBatch(connectionOptions: ConnectionOptions, url: string, requests: BatchRequest[], headers?: any): Promise<any[]> {
+    static requestBatch(connectionOptions: ConnectionOptions, url: string, requests: BatchRequest[], headers?: any): Promise<any[] | undefined> {
         let callUrl: string = connectionOptions.serverUrl;
 
         if (callUrl.endsWith("/"))
@@ -149,20 +157,51 @@ class Batch implements DynamicsBatch {
 
         const batchId = Batch.createId();
 
-        return fetch(callUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': `multipart/mixed;boundary=batch_${batchId}`,
-                'Authorization': connectionOptions.accessToken,
-                ...DynamicsHeaders,
-                ...headers
-            },
-            body: Batch.formatBatchRequest(batchId, requests)
-        })
-            .then(response => Batch.formatBatchResponse(response.text()));
+        if (connectionOptions.authType === AuthenticationType.Windows)
+        {
+            return new Promise((resolve, reject) =>
+            {
+                httpntlm.post({
+                    url: callUrl,
+                    username: connectionOptions.username,
+                    password: connectionOptions.password,
+                    workstation: connectionOptions.workstation || '',
+                    domain: connectionOptions.domain || '',
+                    body: Batch.formatBatchRequest(connectionOptions, batchId, requests),
+                    headers: {
+                        'Content-Type': `multipart/mixed;boundary=batch_${batchId}`,
+                        ...DynamicsHeaders,
+                        ...headers
+                    }
+                }, function (err, res){
+                    if (err) 
+                    { 
+                        console.error(err);
+        
+                        reject(err);
+                    }
+
+                    resolve(Batch.formatBatchResponse(res.responseText));
+                });
+            });   
+        }
+        else
+        {
+            return fetch(callUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': `multipart/mixed;boundary=batch_${batchId}`,
+                    'Authorization': connectionOptions.accessToken,
+                    ...DynamicsHeaders,
+                    ...headers
+                },
+                body: Batch.formatBatchRequest(connectionOptions, batchId, requests)
+            })
+                .then(response => Batch.formatBatchResponse(response.text()));
+        }
     }
 
-    static formatBatchRequest(batchId: string, changes: BatchRequest[]) {
+    static formatBatchRequest(connectionOptions:ConnectionOptions, batchId: string, changes: BatchRequest[]) {
         let batchBody = [];
         let requestBody = [];
         let changeNumber = 1;
@@ -177,7 +216,7 @@ class Batch implements DynamicsBatch {
                 requestBody.push('Content-Transfer-Encoding:binary');
                 requestBody.push('');
                 if (change.entitySetName) {
-                    requestBody.push(`GET ${encodeURI(`/api/data/${WebApiVersion}/${change.entitySetName}?${change.entitySetQuery}`)} HTTP/1.1`);
+                    requestBody.push(`GET ${encodeURI(`/api/data/${connectionOptions.webApiVersion}/${change.entitySetName}?${change.entitySetQuery}`)} HTTP/1.1`);
                 }
                 else {
                     requestBody.push(`GET ${encodeURI(change.entitySetQuery)} HTTP/1.1`);
@@ -192,7 +231,7 @@ class Batch implements DynamicsBatch {
                 batchBody.push('Content-Transfer-Encoding:binary');
                 batchBody.push(`Content-ID: ${changeNumber++}`);
                 batchBody.push('');
-                batchBody.push(`${change.entityId ? 'PATCH' : 'POST'} ${encodeURI(`/api/data/${WebApiVersion}/${change.entitySetName}(${Batch.trimId(change.entityId)})`)} HTTP/1.1`);
+                batchBody.push(`${change.entityId ? 'PATCH' : 'POST'} ${encodeURI(`/api/data/${connectionOptions.webApiVersion}/${change.entitySetName}(${Batch.trimId(change.entityId)})`)} HTTP/1.1`);
                 batchBody.push('Content-Type: application/json;type=entry');
                 batchBody.push('');
                 batchBody.push(JSON.stringify(change.entityData));
@@ -204,7 +243,7 @@ class Batch implements DynamicsBatch {
         return batchBody.join('\n');
     }
 
-    static formatBatchResponse(responseText: Promise<string>): Promise<any[]> {
+    static formatBatchResponse(responseText: Promise<string>): Promise<any[] | undefined> {
         return responseText.then(response => {
             if (response) {
                 if (response.indexOf('"innererror"') > -1
@@ -240,7 +279,12 @@ class Batch implements DynamicsBatch {
         return 'id' + Math.random().toString(16).slice(2);
     }
 
-    static trimId(id: string) {
-        return (id || '').replace(/{|}/g, '');
+    static trimId(id: string | undefined) {
+        if (id !== undefined)
+        {
+            return (id || '').replace(/{|}/g, '');
+        }
+
+        return undefined;
     }
 }

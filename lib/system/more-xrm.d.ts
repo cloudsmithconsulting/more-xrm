@@ -1,3 +1,4 @@
+/// <reference types="node" />
 declare module "Query/Query" {
     export interface DataQuery {
         Alias: any;
@@ -20,6 +21,7 @@ declare module "Query/Query" {
         IsOuterJoin?: boolean;
     }
     export interface Query {
+        [key: string]: any;
         alias(attributeName: string, alias: string): Query;
         path(entityPath: string): Query;
         select(...attributeNames: string[]): Query;
@@ -58,16 +60,31 @@ declare module "Query/QueryXml" {
 }
 declare module "Dynamics/DynamicsRequest" {
     import { Query } from "Query/Query";
-    export function dynamicsQuery<T>(query: Query, maxRowCount?: number, headers?: any): Promise<T[]>;
-    export function dynamicsQueryUrl<T>(dynamicsEntitySetUrl: string, query: Query, maxRowCount?: number, headers?: any): Promise<T[]>;
-    export function dynamicsRequest<T>(dynamicsEntitySetUrl: string, headers?: any): Promise<T>;
-    export function dynamicsSave(entitySetName: string, data: any, id?: string, headers?: any): Promise<string>;
+    export enum AuthenticationType {
+        Windows = 1,
+        OAuth = 2
+    }
+    export class ConnectionOptions {
+        authType: AuthenticationType;
+        username?: string;
+        password?: string;
+        domain?: string;
+        workstation?: string;
+        accessToken?: string;
+        serverUrl: string;
+        webApiVersion: string;
+    }
+    export function dynamicsQuery<T>(connectionOptions: ConnectionOptions, query: Query, maxRowCount?: number, headers?: any): Promise<T[]>;
+    export function dynamicsQueryUrl<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, query: Query, maxRowCount?: number, headers?: any): Promise<T[]>;
+    export function dynamicsRequest<T>(connectionOptions: ConnectionOptions, dynamicsEntitySetUrl: string, headers?: any): Promise<T>;
+    export function dynamicsSave(connectionOptions: ConnectionOptions, entitySetName: string, data: any, id?: string, headers?: any): Promise<string>;
     export function formatDynamicsResponse(data: any): any;
 }
 declare module "Dynamics/DynamicsBatch" {
     import { Query } from "Query/Query";
+    import { ConnectionOptions } from "Dynamics/DynamicsRequest";
     export interface DynamicsBatch {
-        execute(): Promise<any[]>;
+        execute(): Promise<any[] | undefined>;
         request(query: Query, maxRowCount?: number): DynamicsBatch;
         requestAll(queries: Query[]): DynamicsBatch;
         requestAllUrls(urls: string[]): DynamicsBatch;
@@ -75,14 +92,15 @@ declare module "Dynamics/DynamicsBatch" {
             createRelatedEntity(entitySetName: string, data: any, navigationPropertyName: string): void;
         };
     }
-    export function dynamicsBatch(headers?: any): DynamicsBatch;
-    export function dynamicsBatchRequest<T = any>(...url: string[]): Promise<T[]>;
-    export function dynamicsBatchQuery<T = any>(...query: Query[]): Promise<T[]>;
+    export function dynamicsBatch(connectionOptions: ConnectionOptions, headers?: any): DynamicsBatch;
+    export function dynamicsBatchRequest<T = any>(connectionOptions: ConnectionOptions, ...url: string[]): Promise<T[] | undefined>;
+    export function dynamicsBatchQuery<T = any>(connectionOptions: ConnectionOptions, ...query: Query[]): Promise<T[] | undefined>;
 }
 declare module "Dynamics/Dynamics" {
     import { Query } from "Query/Query";
     import { DynamicsBatch } from "Dynamics/DynamicsBatch";
-    export const WebApiVersion = "v9.1";
+    import { ConnectionOptions } from "Dynamics/DynamicsRequest";
+    export const DefaultWebApiVersion = "v9.1";
     export const DefaultMaxRecords = 100;
     export const DynamicsHeaders: {
         'OData-MaxVersion': string;
@@ -99,7 +117,30 @@ declare module "Dynamics/Dynamics" {
         query(entityLogicalName: string, entitySetName: string): Query;
         save(entitySetName: string, data: any, id?: string): Promise<string>;
     }
-    export default function dynamics(accessToken?: string): Dynamics;
+    export default function dynamics(connectionOptions?: ConnectionOptions): Dynamics;
+}
+declare module "Dynamics/Model/OrganizationMetadata" {
+    export interface OrganizationMetadata {
+        Id?: string;
+        UniqueName?: string;
+        UrlName?: string;
+        FriendlyName?: string;
+        State?: number;
+        Version?: string;
+        Uri?: string;
+        AppUri?: string;
+        LastUpdated?: Date;
+    }
+}
+declare module "Dynamics/DynamicsDiscovery" {
+    import { ConnectionOptions } from "Dynamics/DynamicsRequest";
+    import { OrganizationMetadata } from "Dynamics/Model/OrganizationMetadata";
+    export type OrganizationMetadata = OrganizationMetadata;
+    export const DefaultDiscoveryApiVersion = "v9.1";
+    export default function dynamicsDiscovery(connectionOptions?: ConnectionOptions): DynamicsDiscovery;
+    export interface DynamicsDiscovery {
+        discover(): Promise<OrganizationMetadata[]>;
+    }
 }
 declare module "Dynamics/Model/EntityMetadata" {
     export interface EntityMetadata {
@@ -144,6 +185,7 @@ declare module "Dynamics/Model/OptionSetMetadata" {
     }
 }
 declare module "Dynamics/DynamicsMetadata" {
+    import { ConnectionOptions } from "Dynamics/DynamicsRequest";
     import { AttributeMetadata, EntityAttributeMetadata, LookupAttributeMetadata } from "Dynamics/Model/AttributeMetadata";
     import { EntityMetadata } from "Dynamics/Model/EntityMetadata";
     import { OptionSetAttributeMetadata, OptionSetMetadata } from "Dynamics/Model/OptionSetMetadata";
@@ -152,7 +194,7 @@ declare module "Dynamics/DynamicsMetadata" {
     export type DynamicsOptionSetMetadata = OptionSetMetadata;
     export type DynamicsLookupAttributeMetadata = LookupAttributeMetadata;
     export type DynamicsOptionSetAttributeMetadata = OptionSetAttributeMetadata;
-    export default function dynamicsMetadata(accessToken?: string): DynamicsMetadata;
+    export default function dynamicsmetdata(connectionOptions?: ConnectionOptions): DynamicsMetadata;
     export function isLookupAttribute(attribute: DynamicsAttributeMetadata): attribute is DynamicsLookupAttributeMetadata;
     export function isOptionSetAttribute(attribute: DynamicsAttributeMetadata): attribute is DynamicsOptionSetAttributeMetadata;
     export interface DynamicsMetadata {
@@ -162,6 +204,100 @@ declare module "Dynamics/DynamicsMetadata" {
         entityAttributes(...entityNames: string[]): Promise<EntityAttributeMetadata[]>;
     }
     type AnyAttributeMetadata = AttributeMetadata | LookupAttributeMetadata | OptionSetAttributeMetadata;
+}
+declare module "ntlm/ntlm.flags" {
+    export enum NtlmFlags {
+        NEGOTIATE_UNICODE = 1,
+        NEGOTIATE_OEM = 2,
+        REQUEST_TARGET = 4,
+        NEGOTIATE_SIGN = 16,
+        NEGOTIATE_SEAL = 32,
+        NEGOTIATE_DATAGRAM_STYLE = 64,
+        NEGOTIATE_LM_KEY = 128,
+        NEGOTIATE_NETWARE = 256,
+        NEGOTIATE_NTLM_KEY = 512,
+        NEGOTIATE_ANONYMOUS = 2048,
+        NEGOTIATE_DOMAIN_SUPPLIED = 4096,
+        NEGOTIATE_WORKSTATION_SUPPLIED = 8192,
+        NEGOTIATE_LOCAL_CALL = 16384,
+        NEGOTIATE_ALWAYS_SIGN = 32768,
+        TARGET_TYPE_DOMAIN = 65536,
+        TARGET_TYPE_SERVER = 131072,
+        TARGET_TYPE_SHARE = 262144,
+        NEGOTIATE_NTLM2_KEY = 524288,
+        REQUEST_INIT_RESPONSE = 1048576,
+        REQUEST_ACCEPT_RESPONSE = 2097152,
+        REQUEST_NONNT_SESSION_KEY = 4194304,
+        NEGOTIATE_TARGET_INFO = 8388608,
+        NEGOTIATE_VERSION = 33554432,
+        NEGOTIATE_128 = 536870912,
+        NEGOTIATE_KEY_EXCHANGE = 1073741824,
+        NEGOTIATE_56 = -2147483648
+    }
+}
+declare module "ntlm/ntlm.constants" {
+    export class NtlmConstants {
+        static readonly NTLM_SIGNATURE = "NTLMSSP\0";
+    }
+}
+declare module "ntlm/type2.message" {
+    export class Type2Message {
+        raw: Buffer;
+        flags: number;
+        encoding: 'ascii' | 'ucs2';
+        version: number;
+        challenge: Buffer;
+        targetName: string;
+        targetInfo: any;
+        constructor(buf: Buffer);
+        private readTargetName;
+        private parseTargetInfo;
+    }
+}
+declare module "ntlm/hash" {
+    import { Type2Message } from "ntlm/type2.message";
+    export class Hash {
+        static createLMResponse(challenge: Buffer, lmhash: Buffer): Buffer;
+        static createLMHash(password: string): Buffer;
+        static calculateDES(key: Buffer, message: Buffer): Buffer;
+        static createNTLMResponse(challenge: Buffer, ntlmhash: Buffer): Buffer;
+        static createNTLMHash(password: string): Buffer;
+        static createNTLMv2Hash(ntlmhash: Buffer, username: string, authTargetName: string): Buffer;
+        static createLMv2Response(type2message: Type2Message, username: string, authTargetName: string, ntlmhash: Buffer, nonce: string): Buffer;
+        static createNTLMv2Response(type2message: Type2Message, username: string, authTargetName: string, ntlmhash: Buffer, nonce: string, timestamp: string, withMic: boolean): Buffer;
+        static createMIC(type1message: Buffer, type2message: Type2Message, type3message: Buffer, username: string, authTargetName: string, ntlmhash: Buffer, nonce: string, timestamp: string): Buffer;
+        static createRandomSessionKey(type2message: Type2Message, username: string, authTargetName: string, ntlmhash: Buffer, nonce: string, timestamp: string, withMic: boolean): Buffer;
+        static createPseudoRandomValue(length: number): string;
+        static createTimestamp(): string;
+    }
+}
+declare module "ntlm/ntlm.message" {
+    export class NtlmMessage {
+        raw: Buffer;
+        constructor(buf: Buffer);
+        header(): string;
+    }
+}
+declare module "ntlm/interfaces/i.ntlm" {
+    import { Type2Message } from "ntlm/type2.message";
+    import { NtlmMessage } from "ntlm/ntlm.message";
+    export interface INtlm {
+        createType1Message(ntlm_version: number, workstation: string | undefined, target: string | undefined): NtlmMessage;
+        decodeType2Message(str: string | undefined): Type2Message;
+        createType3Message(type1message: NtlmMessage, type2Message: Type2Message, username: string, password: string, workstation: string | undefined, target: string | undefined, client_nonce: string | undefined, timestamp: string | undefined): NtlmMessage;
+    }
+}
+declare module "ntlm/ntlm" {
+    import { INtlm } from "ntlm/interfaces/i.ntlm";
+    import { Type2Message } from "ntlm/type2.message";
+    import { NtlmMessage } from "ntlm/ntlm.message";
+    export default function ntlm(): INtlm;
+    export class Ntlm implements INtlm {
+        createType1Message(ntlm_version: number, workstation: string | undefined, target: string | undefined): NtlmMessage;
+        private addVersionStruct;
+        decodeType2Message(str: string | undefined): Type2Message;
+        createType3Message(type1message: NtlmMessage, type2message: Type2Message, username: string, password: string, workstation: string | undefined, target: string | undefined, client_nonce_override: string | undefined, timestamp_override: string | undefined): NtlmMessage;
+    }
 }
 declare module "tests/dynamicsMetadataTests" {
     export function dynamicsMetadataRetrieveAll(): Promise<void>;

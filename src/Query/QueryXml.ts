@@ -24,7 +24,7 @@ function GetDataQueryXml(query: DataQuery, maxRowCount: number) {
     return xml.join('');
 }
 
-function getQueryXml(query: DataQuery) {
+function getQueryXml(query: DataQuery) : any {
     const xml = [];
 
     query.Attributes.forEach(attribute => {
@@ -36,7 +36,7 @@ function getQueryXml(query: DataQuery) {
         }
     });
     query.OrderBy.forEach(attribute => {
-        if (attribute.indexOf('_') == 0) {
+        if (attribute.indexOf('_') === 0) {
             xml.push(`<order attribute="${attribute.slice(1)}" descending="true" />`);
         }
         else {
@@ -118,16 +118,16 @@ function getConditionXml(condition: DataQueryCondition): string {
     return xml.join('\n');
 }
 
-function encodeValue(value) {
-    if (value === 0) return '0';
-    if (value === true) return 'true';
-    if (value === false) return 'false';
-    if (!value) return '';
-    if (typeof (value.toISOString) === 'function') return value.toISOString();
+function encodeValue(value: any) {
+    if (value === 0) { return '0'; }
+    if (value === true) { return 'true'; }
+    if (value === false) { return 'false'; }
+    if (!value) { return ''; }
+    if (typeof (value.toISOString) === 'function') { return value.toISOString(); }
     return xmlEncode(value.toString());
 }
 
-function xmlEncode(text) {
+function xmlEncode(text: any) {
     if (text && typeof (text) === 'string') {
         text = text.replace(/&/g, '&amp;');
         text = text.replace(/\"/g, '&quot;');
@@ -138,16 +138,16 @@ function xmlEncode(text) {
     return text;
 }
 
-function formatXml(xmlString) {
+function formatXml(xmlString: any) {
     var indent = "\t";
     var tabs = "";  //store the current indentation
 
     return xmlString.replace(
         /\s*<[^>\/]*>[^<>]*<\/[^>]*>|\s*<.+?>|\s*[^<]+/g, //pattern to match nodes (angled brackets or text)
-        function (m, i) {
+        function (m: string, i: number) {
             m = m.replace(/^\s+|\s+$/g, "");  //trim the match just in case
 
-            if (i < 38 && /^<[?]xml/.test(m)) return m + "\n";  //if the match is a header, ignore it
+            if (i < 38 && /^<[?]xml/.test(m)) { return m + "\n"; }  //if the match is a header, ignore it
 
             if (/^<[/]/.test(m))  //if the match is a closing tag
             {

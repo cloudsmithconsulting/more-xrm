@@ -1,5 +1,5 @@
 import dynamics from "../Dynamics/Dynamics";
-import query, { QueryOperator } from "../Query/Query";
+import { QueryOperator } from "../Query/Query";
 import { ConnectionOptions, AuthenticationType } from "../Dynamics/DynamicsRequest";
 
 export async function dynamicsTestAll() {
@@ -7,9 +7,10 @@ export async function dynamicsTestAll() {
     options.authType = AuthenticationType.Windows;
     options.username = "Administrator";
     options.domain = "CONTOSO";
-    options.password = "p@ssw0rd1";
-    options.serverUrl = "http://win-a6ljo0slrsh/test/";
-    
+    options.password = "{password}";
+    options.serverUrl = "http://{server}/{org}/";
+    options.webApiVersion = "v9.0";
+
     const dyn = dynamics(options);
 
     /* Batch Request */

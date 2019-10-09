@@ -19,6 +19,7 @@ export interface DataQueryJoin extends DataQuery {
     IsOuterJoin?: boolean;
 }
 export interface Query {
+    [key: string]: any;
     alias(attributeName: string, alias: string): Query;
     path(entityPath: string): Query;
     select(...attributeNames: string[]): Query;
